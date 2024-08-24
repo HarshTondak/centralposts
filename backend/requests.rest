@@ -1,0 +1,9 @@
+# POST http://localhost:8000/signin
+# Content-Type: application/json
+
+# {
+#     "email": "kunal@gmail.co",
+#     "password": "Kunal1"
+# }
+
+GET http://localhost:8000/latest-blogs

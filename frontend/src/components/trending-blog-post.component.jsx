@@ -3,7 +3,7 @@ import { getDay } from "../common/date";
 
 const TrendingBlogPosts = ({ content, author, index }) => {
   const { publishedAt, title, blog_id: id } = content;
-  const { fullname, profile_img, username } = author;
+  const { profile_img, username } = author;
 
   return (
     <Link to={`/blog/${id}`} className="flex gap-5 mb-8">
@@ -18,9 +18,7 @@ const TrendingBlogPosts = ({ content, author, index }) => {
             alt="author"
             className="w-6 h-6 rounded-full"
           />
-          <p className="line-clamp-1">
-            {fullname} @{username}
-          </p>
+          <p className="line-clamp-1">@{username}</p>
           <p className="min-w-fit">{getDay(publishedAt)}</p>
         </div>
 

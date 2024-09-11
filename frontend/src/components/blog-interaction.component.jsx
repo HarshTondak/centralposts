@@ -1,11 +1,15 @@
-import { useContext } from "react";
-import { BlogContext } from "../pages/blog.page";
+import { toast, Toaster } from "react-hot-toast";
 import { Link } from "react-router-dom";
+import { useContext, useEffect } from "react";
+import axios from "axios";
+
+import { BlogContext } from "../pages/blog.page";
 import { UserContext } from "../App";
 
 const BlogInteraction = () => {
   let {
     blog: {
+      _id,
       title,
       blog_id,
       activity,
@@ -14,23 +18,96 @@ const BlogInteraction = () => {
         personal_info: { username: author_username },
       },
     },
+    blog,
     setBlog,
+    isLikedByUser,
+    setIsLikedByUser,
+    setCommentsWrapperVisible,
   } = useContext(BlogContext);
 
   let {
-    userAuth: { username },
+    userAuth: { username, access_token },
   } = useContext(UserContext);
+
+  useEffect(() => {
+    // when the user is logged in
+    if (access_token) {
+      axios
+        .post(
+          import.meta.env.VITE_SERVER_DOMAIN + "/isliked-by-user",
+          {
+            _id,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${access_token}`,
+            },
+          }
+        )
+        .then(({ data: { result } }) => {
+          setIsLikedByUser(Boolean(result));
+        })
+        .catch((err) => {
+          console.log(err);
+        });
+    }
+  }, []);
+
+  const handleLike = () => {
+    if (access_token) {
+      setIsLikedByUser((prev) => !prev);
+
+      !isLikedByUser ? total_likes++ : total_likes--;
+
+      setBlog({ ...blog, activity: { ...activity, total_likes } });
+
+      axios
+        .post(
+          import.meta.env.VITE_SERVER_DOMAIN + "/like-blog",
+          {
+            _id,
+            isLikedByUser,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${access_token}`,
+            },
+          }
+        )
+        .then(({ data }) => {
+          console.log(data);
+        })
+        .catch((err) => {
+          console.log(err);
+        });
+    } else {
+      toast.error("Kindly login to like this Blog");
+    }
+  };
 
   return (
     <>
+      <Toaster />
       <hr className="border-grey my-2" />
 
       <div className="flex gap-6 justify-between">
         <div className="flex gap-3 items-center">
           {/* Like Button */}
           <div className="flex gap-3 items-center">
-            <button className="w-10 h-10 rounded-full flex items-center justify-center bg-grey/80">
-              <i className="fi fi-rr-heart text-xl mt-1"></i>
+            <button
+              className={
+                "w-10 h-10 rounded-full flex items-center justify-center " +
+                (isLikedByUser ? "bg-red/20 text-red" : "bg-grey/80")
+              }
+              onClick={handleLike}
+            >
+              <i
+                className={
+                  "fi " +
+                  (isLikedByUser ? "fi-sr-heart" : "fi-rr-heart") +
+                  " text-xl mt-1"
+                }
+              ></i>
             </button>
 
             <p className=" text-xl text-dark-grey">{total_likes}</p>
@@ -38,7 +115,10 @@ const BlogInteraction = () => {
 
           {/* Comment Button */}
           <div className="flex gap-3 items-center">
-            <button className="w-10 h-10 rounded-full flex items-center justify-center bg-grey/80">
+            <button
+              className="w-10 h-10 rounded-full flex items-center justify-center bg-grey/80"
+              onClick={() => setCommentsWrapperVisible((prev) => !prev)}
+            >
               <i className="fi fi-rr-comment-dots text-xl mt-1"></i>
             </button>
 

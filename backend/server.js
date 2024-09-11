@@ -16,6 +16,7 @@ import User from "./Schema/User.js";
 import Blog from "./Schema/Blog.js";
 import Comment from "./Schema/Comment.js";
 import Notification from "./Schema/Notification.js";
+import { populate } from "dotenv";
 
 let PORT = process.env.PORT || 8000;
 const server = express();
@@ -264,6 +265,7 @@ server.post("/google-auth", async (req, res) => {
 });
 
 // ============================================================== UPLOAD IMAGE URL
+
 server.get("/get-upload-url", (req, res) => {
   generateUploadURL()
     .then((url) => {
@@ -275,6 +277,7 @@ server.get("/get-upload-url", (req, res) => {
 });
 
 // ============================================================== FETCH ALL LATEST BLOGS
+
 server.post("/latest-blogs", (req, res) => {
   const { page } = req.body;
   const maxLimit = 5;
@@ -297,6 +300,7 @@ server.post("/latest-blogs", (req, res) => {
 });
 
 // ============================================================== FETCH THE BLOGS COUNT
+
 server.post("/all-latest-blogs-count", (req, res) => {
   Blog.countDocuments({ draft: false })
     .then((count) => {
@@ -308,6 +312,7 @@ server.post("/all-latest-blogs-count", (req, res) => {
 });
 
 // ============================================================== FETCH ALL TRENDING BLOGS
+
 server.get("/trending-blogs", (req, res) => {
   let maxLimit = 5;
 
@@ -332,6 +337,7 @@ server.get("/trending-blogs", (req, res) => {
 });
 
 // ============================================================== SEARCHING THE BLOGS
+
 server.post("/search-blogs", (req, res) => {
   let findQuery;
   const { tag, page, author, query, limit, eliminate_blog } = req.body;
@@ -365,6 +371,7 @@ server.post("/search-blogs", (req, res) => {
 });
 
 // ============================================================== FETCH THE BLOGS COUNT
+
 server.post("/search-blogs-count", (req, res) => {
   let findQuery;
   const { tag, author, query } = req.body;
@@ -387,6 +394,7 @@ server.post("/search-blogs-count", (req, res) => {
 });
 
 // ============================================================== SEARCHING THE USERS
+
 server.post("/search-users", (req, res) => {
   let { query } = req.body;
 
@@ -404,6 +412,7 @@ server.post("/search-users", (req, res) => {
 });
 
 // ============================================================== FETCHING THE USER PROFILE
+
 server.post("/get-profile", (req, res) => {
   let { username } = req.body;
 
@@ -418,6 +427,7 @@ server.post("/get-profile", (req, res) => {
 });
 
 // ============================================================== FETCHING THE BLOG DATA
+
 server.post("/get-blog", (req, res) => {
   const { blog_id, draft, mode } = req.body;
 
@@ -429,7 +439,7 @@ server.post("/get-blog", (req, res) => {
   )
     .populate(
       "author",
-      "personal_info.profile_img personal_info.username personal_info.fullname -_id"
+      "personal_info.profile_img personal_info.username personal_info.fullname"
     )
     .select("title desc content banner activity publishedAt blog_id tags")
     .then((blog) => {
@@ -452,7 +462,333 @@ server.post("/get-blog", (req, res) => {
     });
 });
 
+// ============================================================== LIKE THE BLOG
+
+server.post("/like-blog", verifyJWT, (req, res) => {
+  let user_id = req.user;
+  let { _id, isLikedByUser } = req.body;
+
+  let incrementVal = !isLikedByUser ? 1 : -1;
+
+  Blog.findOneAndUpdate(
+    { _id },
+    {
+      $inc: { "activity.total_likes": incrementVal },
+    }
+  )
+    .then((blog) => {
+      if (!isLikedByUser) {
+        let like = new Notification({
+          type: "like",
+          blog: _id,
+          notification_for: blog.author,
+          user: user_id,
+        });
+
+        like.save().then((notification) => {
+          return res.status(200).json({ liked_by_user: true });
+        });
+      } else {
+        Notification.findOneAndDelete({
+          user: user_id,
+          type: "like",
+          blog: _id,
+        })
+          .then((data) => {
+            return res.status(200).json({ liked_by_user: false });
+          })
+          .catch((err) => {
+            return res.status(500).json({ error: err.message });
+          });
+      }
+    })
+    .catch((err) => {
+      return res.status(500).json({ error: err.message });
+    });
+});
+
+// ============================================================== FETCHING THE LIKE STATE OF BLOG
+
+server.post("/isliked-by-user", verifyJWT, (req, res) => {
+  let user_id = req.user;
+  let { _id } = req.body;
+
+  Notification.exists({ user: user_id, type: "like", blog: _id })
+    .then((result) => {
+      return res.status(200).json({ result });
+    })
+    .catch((err) => {
+      return res.status(500).json({ error: err.message });
+    });
+});
+
+// ============================================================== WRITING COMMENT ON THE BLOG
+
+server.post("/add-comment", verifyJWT, (req, res) => {
+  let user_id = req.user;
+  let { _id, comment, blog_author, replying_to } = req.body;
+
+  if (!comment.length) {
+    return res
+      .status(403)
+      .json({ error: "Kindly write something in the comment" });
+  }
+
+  let commentObj = {
+    blog_id: _id,
+    blog_author,
+    comment,
+    commented_by: user_id,
+  };
+
+  if (replying_to) {
+    commentObj.parent = replying_to;
+    commentObj.isReply = true;
+  }
+
+  new Comment(commentObj).save().then(async (commentFile) => {
+    let { comment, commentedAt, children } = commentFile;
+
+    Blog.findOneAndUpdate(
+      { _id },
+      {
+        $push: { comments: commentFile._id },
+        $inc: {
+          "activity.total_comments": 1,
+          "activity.total_parent_comments": replying_to ? 0 : 1,
+        },
+      }
+    ).then((blog) => {
+      console.log("New comment added in the blog");
+    });
+
+    let notifyObj = {
+      type: replying_to ? "reply" : "comment",
+      blog: _id,
+      notification_for: blog_author,
+      user: user_id,
+      comment: commentFile._id,
+    };
+
+    if (replying_to) {
+      notifyObj.replied_on_comment = replying_to;
+
+      await Comment.findOneAndUpdate(
+        { _id: replying_to },
+        { $push: { children: commentFile._id } }
+      ).then((replyingToComment) => {
+        notifyObj.notification_for = replyingToComment.commented_by;
+      });
+    }
+
+    new Notification(notifyObj)
+      .save()
+      .then((notify) => console.log("New notification created"));
+
+    return res
+      .status(200)
+      .json({ comment, commentedAt, _id: commentFile._id, user_id, children });
+  });
+});
+
+// ============================================================== FETCHING THE COMMENTS OF BLOG
+
+server.post("/get-blog-comments", (req, res) => {
+  let { blog_id, skip } = req.body;
+  let maxLimit = 5;
+
+  Comment.find({ blog_id, isReply: false })
+    .populate(
+      "commented_by",
+      "personal_info.username, personal_info.fullname, personal_info.profile_img"
+    )
+    .skip(skip)
+    .limit(maxLimit)
+    .sort({ commentedAt: -1 })
+    .then((comms) => {
+      return res.status(200).json(comms);
+    })
+    .catch((err) => {
+      return res.status(500).json({ error: err.message });
+    });
+});
+
+// ============================================================== FETCHING THE REPLIES OF A COMMENTS
+
+server.post("/get-replies", (req, res) => {
+  let { _id, skip } = req.body;
+  let maxLimit = 5;
+
+  Comment.findOne({ _id })
+    .populate({
+      path: "children",
+      options: {
+        limit: maxLimit,
+        skip: skip,
+        sort: { commentedAt: -1 },
+      },
+      populate: {
+        path: "commented_by",
+        select:
+          "personal_info.username, personal_info.fullname, personal_info.profile_img",
+      },
+      select: "-blog_id -updatedAt",
+    })
+    .select("children")
+    .then((doc) => {
+      return res.status(200).json({ replies: doc.children });
+    })
+    .catch((err) => {
+      return res.status(500).json({ error: err.message });
+    });
+});
+
+// ============================================================== DELETE THE COMMENTS
+
+const deleteComments = (_id) => {
+  Comment.findOneAndDelete({ _id })
+    .then((comment) => {
+      // If comment is a reply
+      if (comment.parent) {
+        Comment.findOneAndUpdate(
+          { _id: comment.parent },
+          { $pull: { children: _id } }
+        ).then((data) =>
+          console.log("Comment(reply) deleted from parent comment.")
+        );
+      }
+
+      // If it is a comment
+      Notification.findOneAndDelete({ comment: _id }).then((notify) =>
+        console.log("Comment notification deleted")
+      );
+
+      // If comment is a reply
+      Notification.findOneAndDelete({ reply: _id }).then((notify) =>
+        console.log("Reply notification deleted")
+      );
+
+      Blog.findOneAndUpdate(
+        { _id: comment.blog_id },
+        {
+          $pull: { comments: _id },
+          $inc: {
+            "activity.total_comments": -1,
+            "activity.total_parent_comments": comment.parent ? 0 : -1,
+          },
+        }
+      ).then((blog) => {
+        if (comment.children.length) {
+          comment.children.map((replies) => {
+            deleteComments(replies);
+          });
+        }
+      });
+    })
+    .catch((err) => {
+      console.log(err.message);
+    });
+};
+
+server.post("/delete-comment", verifyJWT, (req, res) => {
+  const user_id = req.user;
+  const { _id } = req.body;
+
+  Comment.findOne({ _id }).then((comment) => {
+    if (user_id == comment.commented_by || user_id == comment.blog_author) {
+      // Function to delete all the replies of given comment
+      deleteComments(_id);
+      return res.status(200).json({ status: "success" });
+    } else {
+      return res
+        .status(500)
+        .json({ error: "You don't have the authority to delete this comment" });
+    }
+  });
+});
+
+// ============================================================== CHANGE THE PASSWORD FOR LOGIN
+
+server.post("/change-password", verifyJWT, (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword.length) {
+    return res.status(403).json({ error: "Kindly add the Current password" });
+  }
+  if (!newPassword.length) {
+    return res.status(403).json({ error: "Kindly add the New password" });
+  }
+  if (!passwordRegex.test(newPassword)) {
+    return res.status(403).json({
+      error:
+        "Password should be 6 to 20 characters long with a numeric, a lowercase and an uppercase letter",
+    });
+  }
+  if (currentPassword === newPassword) {
+    return res
+      .status(403)
+      .json({ error: "New password should not match the Current password" });
+  }
+
+  User.findOne({ _id: req.user })
+    .then((user) => {
+      if (user.google_auth) {
+        return res.status(403).json({
+          error:
+            "Password change is not allowed for accounts registered through Google Authentication",
+        });
+      }
+
+      bcrypt.compare(
+        currentPassword,
+        user.personal_info.password,
+        (err, response) => {
+          if (err) {
+            return res.status(500).json({
+              error:
+                "Some error occured while changing the password, Please try again later",
+            });
+          }
+          if (!response) {
+            return res
+              .status(403)
+              .json({ error: "Incorrect Current password" });
+          }
+          bcrypt.hash(newPassword, 12, (err, hashedPassword) => {
+            if (err) {
+              return res.status(500).json({
+                error:
+                  "Some error occured while changing the password, Please try again later",
+              });
+            }
+            User.findOneAndUpdate(
+              { _id: req.user },
+              { "personal_info.password": hashedPassword }
+            )
+              .then((x) => {
+                return res
+                  .status(200)
+                  .json({ status: "Password Updated successfully" });
+              })
+              .catch((err) => {
+                return res.status(500).json({
+                  error:
+                    "Some error occured while saving new password, Please try again later",
+                });
+              });
+          });
+        }
+      );
+    })
+    .catch((err) => {
+      return res.status(500).json({
+        error: "User not found",
+      });
+    });
+});
+
 // ============================================================== CREATE THE BLOG
+
 server.post("/create-blog", verifyJWT, (req, res) => {
   let authorId = req.user;
   let { title, desc, banner, tags, content, draft, id } = req.body;

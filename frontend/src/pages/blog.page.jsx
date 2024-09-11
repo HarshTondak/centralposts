@@ -1,12 +1,16 @@
-import { Link, useParams } from "react-router-dom";
 import { createContext, useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import axios from "axios";
+
+import BlogInteraction from "../components/blog-interaction.component";
+import CommentsContainer, {
+  fetchComments,
+} from "../components/comments.component";
+import BlogContent from "../components/blog-content.component";
+import BlogPostCard from "../components/blog-post.component";
 import AnimationWrapper from "../common/page-animation";
 import Loader from "../components/loader.component";
 import { getDay } from "../common/date";
-import BlogInteraction from "../components/blog-interaction.component";
-import BlogPostCard from "../components/blog-post.component";
-import BlogContent from "../components/blog-content.component";
 
 export const blogStructure = {
   title: "",
@@ -24,6 +28,9 @@ const BlogPage = () => {
   const [blog, setBlog] = useState(blogStructure);
   const [similarBlogs, setSimilarBlogs] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isLikedByUser, setIsLikedByUser] = useState(false);
+  const [commentsWrapperVisible, setCommentsWrapperVisible] = useState(false);
+  const [totalParentCommentsLoaded, setTotalParentCommentsLoaded] = useState(0);
 
   let {
     title,
@@ -38,7 +45,12 @@ const BlogPage = () => {
   const fetchBlog = () => {
     axios
       .post(import.meta.env.VITE_SERVER_DOMAIN + "/get-blog", { blog_id })
-      .then(({ data: { blog } }) => {
+      .then(async ({ data: { blog } }) => {
+        blog.comments = await fetchComments({
+          blog_id: blog._id,
+          setParentCommentCountFun: setTotalParentCommentsLoaded,
+        });
+
         setBlog(blog);
 
         // Fetching similar blogs
@@ -71,6 +83,9 @@ const BlogPage = () => {
     setBlog(blogStructure);
     setSimilarBlogs(null);
     setLoading(true);
+    setIsLikedByUser(false);
+    setCommentsWrapperVisible(false);
+    setTotalParentCommentsLoaded(0);
   };
 
   return (
@@ -78,7 +93,20 @@ const BlogPage = () => {
       {loading ? (
         <Loader />
       ) : (
-        <BlogContext.Provider value={{ blog, setBlog }}>
+        <BlogContext.Provider
+          value={{
+            blog,
+            setBlog,
+            isLikedByUser,
+            setIsLikedByUser,
+            commentsWrapperVisible,
+            setCommentsWrapperVisible,
+            totalParentCommentsLoaded,
+            setTotalParentCommentsLoaded,
+          }}
+        >
+          <CommentsContainer />
+
           <div className="max-w-[900px] center py-10 max-lg:px-[5vw]">
             {/* Blog Banner */}
             <img src={banner} alt="blogbanner" className="aspect-video" />
